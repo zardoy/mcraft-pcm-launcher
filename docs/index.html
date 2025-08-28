@@ -36,95 +36,84 @@
                 {
                     url: 'https://mcraft.fun/version.txt',
                     label: 'Cloudflare (preferred)',
-                    onTimeout: {
-                        timeout: 2000
-                    },
+                    status: 'fetching'
+                },
+                {
+                    url: 'https://github.mcraft.fun/version.txt',
+                    label: 'GitHub',
+                    status: 'fetching'
+                },
+                {
+                    url: 'https://vercel.mcraft.fun/version.txt',
+                    label: 'Vercel',
                     status: 'fetching'
                 },
                 {
                     url: 'https://zardoy.github.io/minecraft-web-client/version.txt',
-                    label: 'GitHub',
-                    onTimeout: {
-                        timeout: 2000
-                    },
+                    label: 'zardoy.github.io',
                     status: 'fetching'
-                },
-                {
-                    url: 'https://m.pcm.gg/version.txt',
-                    label: 'Vercel',
-                    status: 'fetching'
-                },
+                }
             ]
 
+            let redirectLocked = false
+            let fastestResponse = null
+            let fastestTime = Infinity
+
             const autoSelect = !(new URLSearchParams(window.location.search).get('noredirect'))
+
+            // Test all sources in parallel and redirect to the fastest responding one
+            if (autoSelect) {
             trustedSources.forEach(async (provider, i) => {
-                const { url, label, onTimeout } = provider
+                    const { url, label } = provider
                 const status = addStatusContainer(label, '', url.replace('/version.txt', ''))
                 const start = Date.now()
+
                 try {
                     const response = await fetch(url)
                     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
-                    provider.status = 'success'
-                    updateStatus(status, true, `${Date.now() - start} OK`)
-                    if (i === 0 && autoSelect) selectProvider(provider.url, provider.label)
-                } catch (err) {
-                    provider.status = 'error'
-                    updateStatus(status, false, `${Date.now() - start} ${String(err)}`)
-                }
-            })
 
-            const doAutoSelect = async () => {
-                for (const provider of trustedSources) {
-                    await new Promise(resolve => {
-                        setTimeout(resolve, provider.onTimeout.timeout)
-                    })
-                    if (provider.status === 'success') {
+                        const responseTime = Date.now() - start
+                    provider.status = 'success'
+                        updateStatus(status, true, `${responseTime}ms OK`)
+
+                        // Check if this is the fastest response so far
+                        if (responseTime < fastestTime && !redirectLocked) {
+                            fastestTime = responseTime
+                            fastestResponse = provider
+
+                            // Redirect immediately to the fastest responding provider
+                            redirectLocked = true
                         selectProvider(provider.url, provider.label)
-                    } else {
-                        if (provider === trustedSources.at(-1)) {
-                            addHelpUi()
                         }
+                    } catch (err) {
+                        provider.status = 'error'
+                        updateStatus(status, false, `${Date.now() - start}ms ${String(err)}`)
                     }
-                }
+                })
             }
-            if (autoSelect) {
-                doAutoSelect()
-            }
+
+
 
             const addHelpUi = () => {
                 const container = document.createElement('div')
                 container.style.fontSize = '18px'
                 container.style.marginTop = '20px'
 
-                // const checkSources = [
-                //     'https://ipv4.icanhazip.com/',
-                //     'https://api.ipify.org/'
-                // ]
-
-                let hasConnection = false
-
-                const checkConnection = async () => {
-                    // for (const url of checkSources) {
-                    //     try {
-                    //         const response = await fetch(url)
-                    //         if (response.ok) {
-                    //             hasConnection = true
-                    //             break
-                    //         }
-                    //     } catch (err) {
-                    //         continue
-                    //     }
-                    // }
-
                     container.innerHTML =
                         'All sources failed to load. Use unblockers like Doge Unblock or join <a href="https://discord.com/invite/xzGRhxtRUt">official Discord server</a> for help or alt links'
-
 
                     document.querySelector('.loader-lines').appendChild(container)
                 }
 
-                checkConnection()
+            // Check if all sources failed after a reasonable timeout
+            setTimeout(() => {
+                if (!fastestResponse && autoSelect) {
+                    const allFailed = trustedSources.every(provider => provider.status === 'error')
+                    if (allFailed) {
+                        addHelpUi()
             }
+                }
+            }, 5000)
         })
 
         let selected = false
@@ -132,7 +121,13 @@
             domain = domain.replace('/version.txt', '')
             if (selected) return
             if (label) localStorage.setItem('mcraft-app-launcher-provider', label)
-            location.href = domain
+
+            // Preserve query string parameters when redirecting
+            const currentUrl = new URL(window.location.href)
+            const queryString = currentUrl.search
+            const redirectUrl = domain + queryString
+
+            location.href = redirectUrl
             // await replaceAppContents(domain)
         }
         const replaceAppContents = async (domain) => {
